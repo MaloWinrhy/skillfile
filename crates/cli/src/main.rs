@@ -3,6 +3,7 @@ mod update_check;
 use skillfile::commands;
 use skillfile::config;
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process;
 
