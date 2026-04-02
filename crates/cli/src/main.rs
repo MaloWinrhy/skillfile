@@ -390,6 +390,28 @@ fn is_discovery_path(path: &str) -> bool {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
 }
 
+fn resolve_entity_type(entity_type: Option<String>) -> Result<String, SkillfileError> {
+    if let Some(et) = entity_type {
+        Ok(et)
+    } else {
+        require_terminal()?;
+        prompt_entity_type()
+    }
+}
+
+fn resolve_required(
+    value: Option<String>,
+    label: &str,
+    placeholder: &str,
+) -> Result<String, SkillfileError> {
+    if let Some(v) = value {
+        Ok(v)
+    } else {
+        require_terminal()?;
+        prompt_input(label, placeholder)
+    }
+}
+
 fn handle_add(source: AddSource, repo_root: &std::path::Path) -> Result<(), SkillfileError> {
     let entry = match source {
         AddSource::Github {
@@ -400,12 +422,17 @@ fn handle_add(source: AddSource, repo_root: &std::path::Path) -> Result<(), Skil
             name: _,
             no_interactive,
         } if is_discovery_path(path.as_deref().unwrap_or(".")) => {
-            let base_path = path.as_deref().unwrap_or(".");
+            let entity_type = resolve_entity_type(entity_type)?;
+            let owner_repo = resolve_required(
+                owner_repo,
+                "GitHub repository (owner/repo)",
+                "e.g. anthropics/skills",
+            )?;
             return commands::add::cmd_add_bulk(
                 &commands::add::BulkAddArgs {
                     entity_type: &entity_type,
                     owner_repo: &owner_repo,
-                    base_path,
+                    base_path: path.as_deref().unwrap_or("."),
                     ref_: ref_.as_deref(),
                     no_interactive,
                 },
@@ -419,23 +446,39 @@ fn handle_add(source: AddSource, repo_root: &std::path::Path) -> Result<(), Skil
             ref_,
             name,
             no_interactive: _,
-        } => commands::add::entry_from_github(&commands::add::GithubEntryArgs {
-            entity_type: &entity_type,
-            owner_repo: &owner_repo,
-            path: path.as_deref().unwrap_or("."),
-            ref_: ref_.as_deref(),
-            name: name.as_deref(),
-        }),
+        } => {
+            let entity_type = resolve_entity_type(entity_type)?;
+            let owner_repo = resolve_required(
+                owner_repo,
+                "GitHub repository (owner/repo)",
+                "e.g. anthropics/skills",
+            )?;
+            commands::add::entry_from_github(&commands::add::GithubEntryArgs {
+                entity_type: &entity_type,
+                owner_repo: &owner_repo,
+                path: path.as_deref().unwrap_or("."),
+                ref_: ref_.as_deref(),
+                name: name.as_deref(),
+            })
+        }
         AddSource::Local {
             entity_type,
             path,
             name,
-        } => commands::add::entry_from_local(&entity_type, &path, name.as_deref()),
+        } => {
+            let entity_type = resolve_entity_type(entity_type)?;
+            let path = resolve_required(path, "Path to .md file", "skills/my-skill/SKILL.md")?;
+            commands::add::entry_from_local(&entity_type, &path, name.as_deref())
+        }
         AddSource::Url {
             entity_type,
             url,
             name,
-        } => commands::add::entry_from_url(&entity_type, &url, name.as_deref()),
+        } => {
+            let entity_type = resolve_entity_type(entity_type)?;
+            let url = resolve_required(url, "URL to .md file", "https://example.com/skill.md")?;
+            commands::add::entry_from_url(&entity_type, &url, name.as_deref())
+        }
     };
     commands::add::cmd_add(&entry, repo_root)
 }
@@ -449,6 +492,35 @@ fn prompt_entity_type() -> Result<String, SkillfileError> {
         .item("agent", "Agent", "")
         .interact()?;
     Ok(et.to_string())
+}
+
+/// Prompt the user to input a value for the given label, with validation.
+///
+/// Returns an error if the prompt fails, if the user cancels, or if the input is empty.
+fn prompt_input(label: &str, placeholder: &str) -> Result<String, SkillfileError> {
+    let value: String = cliclack::input(label)
+        .placeholder(placeholder)
+        .validate(|v: &String| {
+            if v.trim().is_empty() {
+                Err("This field is required")
+            } else {
+                Ok(())
+            }
+        })
+        .interact()?;
+    Ok(value)
+}
+
+/// Prompt the user to select a source type (GitHub, local file, or URL) for interactive add.
+///
+/// Returns an error if the prompt fails or if the user cancels the selection.
+fn require_terminal() -> Result<(), SkillfileError> {
+    if !std::io::stderr().is_terminal() {
+        return Err(SkillfileError::Manifest(
+            "missing required arguments; interactive prompts require a terminal".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn run_install(repo_root: &Path, dry_run: bool, update: bool) -> Result<(), SkillfileError> {
