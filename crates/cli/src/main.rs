@@ -440,6 +440,17 @@ fn handle_add(source: AddSource, repo_root: &std::path::Path) -> Result<(), Skil
     commands::add::cmd_add(&entry, repo_root)
 }
 
+/// Prompt the user to select an entity type (skill or agent) for interactive add.
+///
+/// Returns an error if the prompt fails or if the user cancels the selection.
+fn prompt_entity_type() -> Result<String, SkillfileError> {
+    let et: &str = cliclack::select("What are you adding?")
+        .item("skill", "Skill", "")
+        .item("agent", "Agent", "")
+        .interact()?;
+    Ok(et.to_string())
+}
+
 fn run_install(repo_root: &Path, dry_run: bool, update: bool) -> Result<(), SkillfileError> {
     let user_targets = config::read_user_targets();
     let extra = if user_targets.is_empty() {
