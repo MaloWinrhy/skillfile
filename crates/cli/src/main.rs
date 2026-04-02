@@ -338,10 +338,10 @@ enum AddSource {
     Github {
         /// Entity type: skill or agent
         #[arg(value_name = "TYPE", value_parser = parse_entity_type)]
-        entity_type: String,
+        entity_type: Option<String>,
         /// GitHub repository (e.g. owner/repo)
         #[arg(value_name = "OWNER/REPO")]
-        owner_repo: String,
+        owner_repo: Option<String>,
         /// Path within the repo (omit to discover all entries)
         #[arg(value_name = "PATH")]
         path: Option<String>,
@@ -359,10 +359,10 @@ enum AddSource {
     Local {
         /// Entity type: skill or agent
         #[arg(value_name = "TYPE", value_parser = parse_entity_type)]
-        entity_type: String,
+        entity_type: Option<String>,
         /// Path to the .md file relative to repo root
         #[arg(value_name = "PATH")]
-        path: String,
+        path: Option<String>,
         /// Override name (default: filename stem)
         #[arg(long, value_name = "NAME")]
         name: Option<String>,
@@ -371,10 +371,10 @@ enum AddSource {
     Url {
         /// Entity type: skill or agent
         #[arg(value_name = "TYPE", value_parser = parse_entity_type)]
-        entity_type: String,
+        entity_type: Option<String>,
         /// Direct URL to the .md file
         #[arg(value_name = "URL")]
-        url: String,
+        url: Option<String>,
         /// Override name (default: filename stem)
         #[arg(long, value_name = "NAME")]
         name: Option<String>,
