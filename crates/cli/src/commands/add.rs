@@ -274,6 +274,37 @@ pub fn cmd_add(entry: &Entry, repo_root: &Path) -> Result<(), SkillfileError> {
     Ok(())
 }
 
+/// Pre-filled values for the GitHub add wizard.
+///
+/// Any field set to `Some(...)` skips the corresponding prompt; `None` means
+/// ask the user. An empty `GithubSeed::default()` reproduces the original
+/// fully-interactive flow.
+#[derive(Default)]
+pub struct GithubSeed {
+    pub entity_type: Option<String>,
+    pub owner_repo: Option<String>,
+    pub path: Option<String>,
+    pub ref_: Option<String>,
+    pub name: Option<String>,
+    pub no_interactive: bool,
+}
+
+/// Pre-filled values for the local-file add wizard.
+#[derive(Default)]
+pub struct LocalSeed {
+    pub entity_type: Option<String>,
+    pub path: Option<String>,
+    pub name: Option<String>,
+}
+
+/// Pre-filled values for the URL add wizard.
+#[derive(Default)]
+pub struct UrlSeed {
+    pub entity_type: Option<String>,
+    pub url: Option<String>,
+    pub name: Option<String>,
+}
+
 /// Interactive add wizard — launched by bare `skillfile add` with no subcommand.
 ///
 /// Guides the user through source selection and delegates to existing
@@ -305,7 +336,7 @@ pub fn cmd_add_interactive(repo_root: &Path) -> Result<(), SkillfileError> {
         .interact()?;
 
     match source {
-        "github" => wizard_github(repo_root),
+        "github" => wizard_github(repo_root, GithubSeed::default()),
         "search" => wizard_search(repo_root),
         "local" => wizard_local(repo_root),
         "url" => wizard_url(repo_root),
@@ -339,57 +370,119 @@ fn discover_top_level_dirs(owner_repo: &str) -> Vec<String> {
     dirs.into_iter().collect()
 }
 
-/// GitHub wizard flow: owner/repo → validate → entity type → path with hints → discovery TUI.
-fn wizard_github(repo_root: &Path) -> Result<(), SkillfileError> {
+/// Error out if we need to prompt but stderr is not a TTY.
+fn require_tty(missing: &str) -> Result<(), SkillfileError> {
+    if std::io::stderr().is_terminal() {
+        Ok(())
+    } else {
+        Err(SkillfileError::Manifest(format!(
+            "missing argument '{missing}' and no terminal available for interactive prompt"
+        )))
+    }
+}
+
+/// Validate an entity type string ("skill" or "agent"). Returns a normalized
+/// owned value or a display-ready error message.
+fn normalize_entity_type(value: &str) -> Result<String, String> {
+    match value {
+        "skill" | "agent" => Ok(value.to_string()),
+        _ => Err(format!(
+            "invalid type '{value}': expected 'skill' or 'agent'"
+        )),
+    }
+}
+
+/// Returns `true` if `path` looks like a directory discovery request rather
+/// than a single-file add. A path that doesn't end in `.md` is a directory.
+fn is_discovery_path(path: &str) -> bool {
+    path == "."
+        || !std::path::Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+}
+
+/// GitHub wizard flow: for each field, use the seed value or prompt.
+///
+/// - `entity_type` defaults to `"skill"` when the seed is empty (agents
+///   are rare and structurally identical). If provided, it's validated.
+/// - `owner_repo` and `path` are prompted when missing; prompting
+///   requires a terminal (see `require_tty`).
+/// - If the resolved path looks like a directory (`is_discovery_path`),
+///   routes to `cmd_add_bulk`; otherwise adds a single entry via `cmd_add`.
+pub fn wizard_github(repo_root: &Path, seed: GithubSeed) -> Result<(), SkillfileError> {
     use skillfile_core::output::Spinner;
 
-    let owner_repo: String = cliclack::input("GitHub repository (owner/repo)")
-        .placeholder("e.g. anthropics/skills")
-        .validate(|v: &String| {
-            if v.contains('/') && v.len() > 2 {
-                Ok(())
-            } else {
-                Err("Expected format: owner/repo")
-            }
-        })
-        .interact()?;
+    let entity_type = match seed.entity_type.as_deref() {
+        Some(v) => normalize_entity_type(v).map_err(SkillfileError::Manifest)?,
+        None => "skill".to_string(),
+    };
 
-    // Validate repo exists before asking more questions.
+    let owner_repo: String = match seed.owner_repo {
+        Some(v) => v,
+        None => {
+            require_tty("owner/repo")?;
+            cliclack::input("GitHub repository (owner/repo)")
+                .placeholder("e.g. anthropics/skills")
+                .validate(|v: &String| {
+                    if v.contains('/') && v.len() > 2 {
+                        Ok(())
+                    } else {
+                        Err("Expected format: owner/repo")
+                    }
+                })
+                .interact()?
+        }
+    };
+
+    // Validate repo exists before further prompts or discovery.
     let spinner = Spinner::new(&format!("Checking {owner_repo}..."));
     let valid = validate_github_repo(&owner_repo);
     spinner.finish();
     valid?;
 
-    // Default to "skill" — agents are rare and structurally identical.
-    // Users adding agents can use `skillfile add github agent ...` directly.
-    let entity_type = "skill";
+    let base_path: String = match seed.path {
+        Some(v) => v,
+        None => {
+            require_tty("path")?;
+            // Discover top-level dirs for the path hint.
+            let spinner = Spinner::new("Scanning repository...");
+            let top_dirs = discover_top_level_dirs(&owner_repo);
+            spinner.finish();
 
-    // Discover top-level dirs for the path hint.
-    let spinner = Spinner::new("Scanning repository...");
-    let top_dirs = discover_top_level_dirs(&owner_repo);
-    spinner.finish();
+            let path_hint = if top_dirs.is_empty() {
+                "press Enter to scan the entire repo".to_owned()
+            } else {
+                format!("found: {}  (or . for all)", top_dirs.join(", "))
+            };
 
-    let path_hint = if top_dirs.is_empty() {
-        "press Enter to scan the entire repo".to_owned()
-    } else {
-        format!("found: {}  (or . for all)", top_dirs.join(", "))
+            cliclack::input("Path within repo")
+                .placeholder(&path_hint)
+                .default_input(".")
+                .interact()?
+        }
     };
 
-    let base_path: String = cliclack::input("Path within repo")
-        .placeholder(&path_hint)
-        .default_input(".")
-        .interact()?;
-
-    cmd_add_bulk(
-        &BulkAddArgs {
-            entity_type,
+    if is_discovery_path(&base_path) {
+        cmd_add_bulk(
+            &BulkAddArgs {
+                entity_type: &entity_type,
+                owner_repo: &owner_repo,
+                base_path: &base_path,
+                ref_: seed.ref_.as_deref(),
+                no_interactive: seed.no_interactive,
+            },
+            repo_root,
+        )
+    } else {
+        let entry = entry_from_github(&GithubEntryArgs {
+            entity_type: &entity_type,
             owner_repo: &owner_repo,
-            base_path: &base_path,
-            ref_: None,
-            no_interactive: false,
-        },
-        repo_root,
-    )
+            path: &base_path,
+            ref_: seed.ref_.as_deref(),
+            name: seed.name.as_deref(),
+        });
+        cmd_add(&entry, repo_root)
+    }
 }
 
 fn wizard_search(repo_root: &Path) -> Result<(), SkillfileError> {
