@@ -334,15 +334,17 @@ Examples:
 
 #[derive(Subcommand)]
 enum AddSource {
-    /// Add a GitHub-hosted entry (use trailing / to discover and bulk-add)
+    /// Add a GitHub-hosted entry. Any omitted positional argument is
+    /// prompted for interactively (requires a terminal).
     Github {
-        /// Entity type: skill or agent
-        #[arg(value_name = "TYPE", value_parser = parse_entity_type)]
+        /// Entity type: skill or agent (prompted if omitted)
+        #[arg(value_name = "TYPE")]
         entity_type: Option<String>,
-        /// GitHub repository (e.g. owner/repo)
+        /// GitHub repository, e.g. owner/repo (prompted if omitted)
         #[arg(value_name = "OWNER/REPO")]
         owner_repo: Option<String>,
-        /// Path within the repo (omit to discover all entries)
+        /// Path within the repo (prompted if omitted; "." or a directory
+        /// triggers discovery)
         #[arg(value_name = "PATH")]
         path: Option<String>,
         /// Branch, tag, or SHA (default: main)
