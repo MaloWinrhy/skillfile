@@ -357,18 +357,19 @@ enum AddSource {
         #[arg(long)]
         no_interactive: bool,
     },
-    /// Add a local file entry
+    /// Add a local file entry. Omitted positional arguments are prompted.
     Local {
-        /// Entity type: skill or agent
-        #[arg(value_name = "TYPE", value_parser = parse_entity_type)]
+        /// Entity type: skill or agent (prompted if omitted)
+        #[arg(value_name = "TYPE")]
         entity_type: Option<String>,
-        /// Path to the .md file relative to repo root
+        /// Path to the .md file relative to repo root (prompted if omitted)
         #[arg(value_name = "PATH")]
         path: Option<String>,
         /// Override name (default: filename stem)
         #[arg(long, value_name = "NAME")]
         name: Option<String>,
     },
+
     /// Add a URL entry
     Url {
         /// Entity type: skill or agent
